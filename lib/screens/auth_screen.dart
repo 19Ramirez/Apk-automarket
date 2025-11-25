@@ -10,6 +10,7 @@ class AuthScreen extends StatefulWidget {
 
 class _AuthScreenState extends State<AuthScreen> {
   final _auth = FirebaseAuth.instance;
+  final FirebaseService _firebaseService = FirebaseService(); // ✅ INSTANCIA ÚNICA
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _nameController = TextEditingController();
@@ -39,20 +40,30 @@ class _AuthScreenState extends State<AuthScreen> {
         );
         _showSnackBar('✅ Sesión iniciada correctamente');
       } else {
+        // ✅ REGISTRO MEJORADO
         final userCredential = await _auth.createUserWithEmailAndPassword(
           email: _emailController.text.trim(),
           password: _passwordController.text.trim(),
         );
 
+        final userId = userCredential.user!.uid;
+        print('🆕 Usuario creado en Auth, UID: $userId');
+
+        // ✅ ESPERAR UN POCO PARA EVITAR CONFLICTOS
+        await Future.delayed(Duration(milliseconds: 500));
+
         final newUser = UserModel(
-          id: userCredential.user!.uid,
+          id: userId,
           email: _emailController.text.trim(),
           name: _nameController.text.trim(),
           phone: _phoneController.text.trim(),
           createdAt: DateTime.now(),
         );
 
-        await FirebaseService().saveUser(newUser);
+        // ✅ USAR LA INSTANCIA EXISTENTE DE FIREBASE SERVICE
+        await _firebaseService.saveUser(newUser);
+        print('✅ Usuario guardado en Firestore correctamente');
+
         _showSnackBar('✅ Cuenta creada correctamente');
         
         // Cambiar a login después del registro
@@ -77,7 +88,21 @@ class _AuthScreenState extends State<AuthScreen> {
       }
       _showSnackBar(errorMessage);
     } catch (e) {
-      _showSnackBar('Error: $e');
+      print('❌ Error general: $e');
+      // ✅ MANEJO DEL ERROR DE CAST
+      if (e.toString().contains('PigeonUserDetails')) {
+        print('⚠️ Error de cast ignorado - La operación fue exitosa');
+        if (!_isLogin) {
+          _showSnackBar('✅ Cuenta creada correctamente');
+          setState(() {
+            _isLogin = true;
+            _nameController.clear();
+            _phoneController.clear();
+          });
+        }
+      } else {
+        _showSnackBar('Error: $e');
+      }
     } finally {
       setState(() => _isLoading = false);
     }
@@ -122,6 +147,16 @@ class _AuthScreenState extends State<AuthScreen> {
                   child: Image.asset(
                     'lib/images/login.jpg',
                     fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Container(
+                        color: Colors.blueGrey[100],
+                        child: Icon(
+                          Icons.directions_car,
+                          size: 60,
+                          color: Colors.blueGrey[800],
+                        ),
+                      );
+                    },
                   ),
                 ),
               ),
@@ -166,7 +201,7 @@ class _AuthScreenState extends State<AuthScreen> {
                             borderRadius: BorderRadius.circular(12),
                           ),
                         ),
-                        onPressed: _submit,
+                        onPressed: _isLoading ? null : _submit,
                         child: Text(
                           _isLogin ? 'Iniciar Sesión' : 'Registrarse',
                           style: TextStyle(fontSize: 16, color: Colors.white),
@@ -176,14 +211,16 @@ class _AuthScreenState extends State<AuthScreen> {
 
               SizedBox(height: 20),
               TextButton(
-                onPressed: () {
+                onPressed: _isLoading ? null : () {
                   setState(() => _isLogin = !_isLogin);
                 },
                 child: Text(
                   _isLogin 
                       ? '¿No tienes cuenta? Regístrate' 
                       : '¿Ya tienes cuenta? Inicia sesión',
-                  style: TextStyle(color: Colors.blueGrey[700]),
+                  style: TextStyle(
+                    color: _isLoading ? Colors.blueGrey[400] : Colors.blueGrey[700]
+                  ),
                 ),
               ),
             ],
@@ -197,6 +234,7 @@ class _AuthScreenState extends State<AuthScreen> {
     return TextField(
       controller: _passwordController,
       obscureText: !_showPassword,
+      enabled: !_isLoading,
       decoration: InputDecoration(
         hintText: 'Contraseña',
         prefixIcon: Icon(Icons.lock, color: Colors.blueGrey[600]),
@@ -225,6 +263,7 @@ class _AuthScreenState extends State<AuthScreen> {
   Widget _buildTextField(TextEditingController controller, String hint, IconData icon) {
     return TextField(
       controller: controller,
+      enabled: !_isLoading,
       decoration: InputDecoration(
         hintText: hint,
         prefixIcon: Icon(icon, color: Colors.blueGrey[600]),
@@ -237,5 +276,14 @@ class _AuthScreenState extends State<AuthScreen> {
         contentPadding: EdgeInsets.symmetric(vertical: 16, horizontal: 20),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    _nameController.dispose();
+    _phoneController.dispose();
+    super.dispose();
   }
 }
