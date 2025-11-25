@@ -20,7 +20,7 @@ class FirebaseService {
       if (vehicle.id == null) {
         final docRef = _firestore.collection('vehicles').doc();
         vehicle.id = docRef.id;
-        vehicle.userId = userId; // Asegurar que tenga userId
+        vehicle.userId = userId;
       }
       
       await _firestore.collection('vehicles').doc(vehicle.id).set(
@@ -36,8 +36,8 @@ class FirebaseService {
         .collection('vehicles')
         .orderBy('createdAt', descending: true)
         .snapshots()
-        .map((snapshot) => snapshot.docs.map((doc) => 
-            Vehicle.fromMap(doc.id, doc.data() as Map<String, dynamic>)
+        .map((snapshot) => snapshot.docs.map((doc) =>
+            Vehicle.fromMap(doc.id, doc.data()!)
         ).toList());
   }
 
@@ -47,8 +47,8 @@ class FirebaseService {
         .where('userId', isEqualTo: userId)
         .orderBy('createdAt', descending: true)
         .snapshots()
-        .map((snapshot) => snapshot.docs.map((doc) => 
-            Vehicle.fromMap(doc.id, doc.data() as Map<String, dynamic>)
+        .map((snapshot) => snapshot.docs.map((doc) =>
+            Vehicle.fromMap(doc.id, doc.data()!)
         ).toList());
   }
 
@@ -129,7 +129,6 @@ class FirebaseService {
         throw Exception('No tienes permisos de administrador');
       }
       
-      // Prevenir que el super admin se elimine a sí mismo
       if (userId == 'XCs21m7R5aQuyfSwMw6F27s3zP13') {
         throw Exception('No se puede eliminar al super administrador');
       }
@@ -140,7 +139,6 @@ class FirebaseService {
     }
   }
 
-  // MÉTODO getAdminsStream MEJORADO
   Stream<List<Map<String, dynamic>>> getAdminsStream() {
     return _firestore
         .collection('admins')
@@ -150,7 +148,6 @@ class FirebaseService {
       
       for (final doc in snapshot.docs) {
         try {
-          // Obtener información del usuario para cada admin
           final userDoc = await _firestore.collection('users').doc(doc.id).get();
           final userData = userDoc.data();
           
@@ -164,7 +161,6 @@ class FirebaseService {
           });
         } catch (e) {
           print('Error obteniendo info del admin ${doc.id}: $e');
-          // Agregar admin sin info de usuario
           adminsList.add({
             'uid': doc.id,
             'adminData': doc.data(),
@@ -176,7 +172,6 @@ class FirebaseService {
         }
       }
       
-      // Agregar el super admin si no está en la lista
       const superAdminUid = 'XCs21m7R5aQuyfSwMw6F27s3zP13';
       final hasSuperAdmin = adminsList.any((admin) => admin['uid'] == superAdminUid);
       
@@ -227,7 +222,7 @@ class FirebaseService {
       
       final usersCount = (await _firestore.collection('users').get()).size;
       final vehiclesCount = (await _firestore.collection('vehicles').get()).size;
-      final adminsCount = (await _firestore.collection('admins').get()).size + 1; // +1 por el super admin
+      final adminsCount = (await _firestore.collection('admins').get()).size + 1;
       
       return {
         'totalUsers': usersCount,
@@ -239,63 +234,131 @@ class FirebaseService {
     }
   }
 
-  // ELIMINACIÓN DE CUENTA MEJORADA
-  Future<void> deleteUserAccount() async {
+  // VERIFICACIÓN SIMPLIFICADA PARA ELIMINACIÓN
+  Future<Map<String, dynamic>> checkDeletePermissions() async {
     try {
       final user = _auth.currentUser;
-      if (user == null) throw Exception('Usuario no autenticado');
-
-      final userId = user.uid;
-      print('🔄 Iniciando eliminación de cuenta para: $userId');
-
-      // Verificar que el usuario es quien dice ser
-      if (user.uid != userId) {
-        throw Exception('No autorizado para eliminar esta cuenta');
+      if (user == null) {
+        return {
+          'canDelete': false,
+          'message': 'No hay usuario autenticado',
+          'userEmail': 'No autenticado',
+        };
       }
 
-      // 1. Obtener todos los vehículos del usuario en lotes
-      final vehiclesQuery = _firestore
-          .collection('vehicles')
-          .where('userId', isEqualTo: userId)
-          .limit(100);
+      final userId = user.uid;
+      
+      // Cualquier usuario puede eliminar EXCEPTO super admin
+      if (isSuperAdmin(userId)) {
+        return {
+          'canDelete': false,
+          'message': 'No se puede eliminar la cuenta del super administrador',
+          'userEmail': user.email,
+        };
+      }
 
-      final vehiclesSnapshot = await vehiclesQuery.get();
-      print('📦 Encontrados ${vehiclesSnapshot.docs.length} vehículos');
-
-      // 2. Eliminar en transacción para mayor seguridad
-      await _firestore.runTransaction((transaction) async {
-        // Eliminar vehículos
-        for (final doc in vehiclesSnapshot.docs) {
-          transaction.delete(doc.reference);
-        }
-        
-        // Eliminar usuario
-        transaction.delete(_firestore.collection('users').doc(userId));
-        
-        // Eliminar de admins si existe
-        transaction.delete(_firestore.collection('admins').doc(userId));
-      });
-
-      print('✅ Datos de Firestore eliminados');
-
-      // 3. Manejar chats de manera más eficiente
-      await _deleteUserChats(userId);
-
-      // 4. Eliminar cuenta de autenticación
-      await user.delete();
-      print('✅ Cuenta de autenticación eliminada');
-
-      // 5. Cerrar sesión
-      await _auth.signOut();
-      print('🚪 Sesión cerrada');
+      return {
+        'canDelete': true,
+        'message': 'Puedes eliminar tu cuenta',
+        'userEmail': user.email,
+        'userId': userId,
+      };
 
     } catch (e) {
-      print('❌ Error al eliminar cuenta: $e');
-      throw Exception('Error al eliminar cuenta: $e');
+      return {
+        'canDelete': false,
+        'message': 'Error al verificar: $e',
+        'userEmail': 'Error',
+      };
     }
   }
 
-  // Método auxiliar para eliminar chats
+  // ELIMINACIÓN DE CUENTA - CUALQUIER USUARIO PUEDE ELIMINAR
+  Future<void> deleteUserAccount() async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) {
+        throw Exception('No hay usuario autenticado');
+      }
+
+      final userId = user.uid;
+      final userEmail = user.email ?? 'Sin email';
+      
+      print('🔄 Iniciando eliminación para: $userEmail ($userId)');
+
+      // Verificar que no sea super admin (protección extra)
+      if (isSuperAdmin(userId)) {
+        throw Exception('No se puede eliminar la cuenta del super administrador');
+      }
+
+      // ELIMINACIÓN PASO A PASO - SIN VERIFICACIONES COMPLEJAS
+      print('🗑️ Paso 1: Eliminando vehículos...');
+      await _deleteUserVehiclesSimple(userId);
+
+      print('🗑️ Paso 2: Eliminando chats...');
+      await _deleteUserChats(userId);
+
+      print('🗑️ Paso 3: Eliminando permisos de admin (si existen)...');
+      await _deleteAdminPermissions(userId);
+
+      print('🗑️ Paso 4: Eliminando usuario de Firestore...');
+      await _firestore.collection('users').doc(userId).delete();
+
+      print('🔐 Paso 5: Eliminando cuenta de autenticación...');
+      await user.delete();
+
+      print('🚪 Paso 6: Cerrando sesión...');
+      await _auth.signOut();
+
+      print('✅ ELIMINACIÓN COMPLETADA EXITOSAMENTE');
+
+    } catch (e) {
+      print('❌ Error en eliminación: $e');
+      _handleDeleteError(e);
+    }
+  }
+
+  // MÉTODO MEJORADO PARA ELIMINAR PERMISOS DE ADMIN
+  Future<void> _deleteAdminPermissions(String userId) async {
+    try {
+      // Intentar eliminar directamente - las reglas permiten si es el propio usuario
+      await _firestore.collection('admins').doc(userId).delete();
+      print('✅ Permisos de admin eliminados');
+    } catch (e) {
+      // Si falla, probablemente porque no era admin o no existe
+      print('ℹ️ Usuario no tenía permisos de admin o no se pudieron eliminar: $e');
+      // No relanzar excepción - no es crítico para la eliminación
+    }
+  }
+
+  // MÉTODO SIMPLIFICADO PARA ELIMINAR VEHÍCULOS
+  Future<void> _deleteUserVehiclesSimple(String userId) async {
+    try {
+      final vehiclesSnapshot = await _firestore
+          .collection('vehicles')
+          .where('userId', isEqualTo: userId)
+          .get();
+
+      if (vehiclesSnapshot.docs.isEmpty) {
+        print('ℹ️ No hay vehículos para eliminar');
+        return;
+      }
+
+      // Eliminar en lotes
+      final batch = _firestore.batch();
+      for (final doc in vehiclesSnapshot.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+      
+      print('✅ ${vehiclesSnapshot.docs.length} vehículos eliminados');
+    } catch (e) {
+      print('⚠️ Error eliminando vehículos: $e');
+      // Continuar con la eliminación aunque falle este paso
+    }
+  }
+
+  // MÉTODO SIMPLIFICADO PARA ELIMINAR CHATS
   Future<void> _deleteUserChats(String userId) async {
     try {
       final chatsQuery = await _firestore
@@ -303,24 +366,101 @@ class FirebaseService {
           .where('participants.$userId', isGreaterThan: '')
           .get();
 
+      if (chatsQuery.docs.isEmpty) {
+        print('ℹ️ No hay chats para eliminar');
+        return;
+      }
+
       final batch = _firestore.batch();
       
       for (final chatDoc in chatsQuery.docs) {
-        // Eliminar mensajes primero
-        final messages = await chatDoc.reference.collection('messages').get();
-        for (final messageDoc in messages.docs) {
-          batch.delete(messageDoc.reference);
+        try {
+          // Eliminar mensajes del chat
+          final messages = await chatDoc.reference.collection('messages').get();
+          for (final messageDoc in messages.docs) {
+            batch.delete(messageDoc.reference);
+          }
+          
+          // Eliminar el chat
+          batch.delete(chatDoc.reference);
+        } catch (e) {
+          print('⚠️ Error procesando chat ${chatDoc.id}: $e');
         }
-        
-        // Eliminar chat
-        batch.delete(chatDoc.reference);
       }
       
       await batch.commit();
-      print('🗑️ Eliminados ${chatsQuery.docs.length} chats');
+      print('✅ ${chatsQuery.docs.length} chats eliminados');
+      
     } catch (e) {
-      print('⚠️ No se pudieron eliminar algunos chats: $e');
-      // Continuar sin fallar la eliminación completa
+      print('⚠️ Error eliminando chats: $e');
+      // No propagar el error
+    }
+  }
+
+  // MANEJO DE ERRORES ACTUALIZADO
+  void _handleDeleteError(dynamic e) {
+    final errorMsg = e.toString();
+    
+    if (errorMsg.contains('permission-denied')) {
+      throw Exception(
+        'Error de permisos.\n'
+        'Las reglas de seguridad no permiten la eliminación.\n'
+        'Contacta al administrador del sistema.'
+      );
+    } else if (errorMsg.contains('requires-recent-login')) {
+      throw Exception(
+        'Se requiere autenticación reciente.\n'
+        'Por favor, cierra sesión y vuelve a iniciar antes de eliminar tu cuenta.'
+      );
+    } else {
+      throw Exception('Error al eliminar la cuenta: $e');
+    }
+  }
+
+  // VERIFICACIÓN DE DATOS (OPCIONAL)
+  Future<Map<String, dynamic>> verifyUserData() async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) {
+        return {
+          'exists': false, 
+          'message': 'No autenticado',
+          'userId': null,
+          'userEmail': null,
+          'vehiclesCount': 0,
+          'isAdmin': false
+        };
+      }
+
+      final userId = user.uid;
+      
+      // Verificar usuario en Firestore
+      final userDoc = await _firestore.collection('users').doc(userId).get();
+      final userExists = userDoc.exists;
+
+      // Verificar vehículos
+      final vehicles = await _firestore
+          .collection('vehicles')
+          .where('userId', isEqualTo: userId)
+          .get();
+
+      return {
+        'exists': userExists,
+        'userId': userId,
+        'userEmail': user.email,
+        'vehiclesCount': vehicles.docs.length,
+        'message': userExists ? 
+          'Usuario encontrado con ${vehicles.docs.length} vehículos' : 
+          'Usuario NO encontrado en Firestore'
+      };
+    } catch (e) {
+      return {
+        'exists': false,
+        'message': 'Error al verificar: $e',
+        'vehiclesCount': 0,
+        'userId': null,
+        'userEmail': null
+      };
     }
   }
 
@@ -328,7 +468,7 @@ class FirebaseService {
     await _auth.signOut();
   }
 
-  bool isSuperAdmin(String userId) {
+  bool isSuperAdmin(String userId) {  
     return userId == 'XCs21m7R5aQuyfSwMw6F27s3zP13';
   }
 }
