@@ -1,0 +1,6 @@
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "lib/images/logoprin.jpg"
+  adaptive_icon_background: "#1a237e"
+  adaptive_icon_foreground: "lib/images/logoprin.jpg"

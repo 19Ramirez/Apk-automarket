@@ -1,0 +1,38 @@
+name: auto_market
+description: "Marketplace de vehículos - AutoMarket"
+
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  firebase_core: ^2.15.0
+  firebase_auth: ^4.13.0
+  cloud_firestore: ^4.9.0
+  image_picker: ^1.0.4
+  url_launcher: ^6.1.11
+  photo_view: ^0.14.0
+  http: ^1.1.0
+  shared_preferences: ^2.2.2
+  cached_network_image: ^3.3.0
+  intl: ^0.18.1
+  image: ^4.0.17
+  share_plus: ^7.0.0
+  cupertino_icons: ^1.0.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - lib/images/login.jpg
+    - lib/images/logoprin.jpg
